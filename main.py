@@ -1,11 +1,16 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_cors import CORS, cross_origin  
+from flask_cors import CORS, cross_origin
+from sqlalchemy.orm import Session
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://root:root@localhost/checklist'  # Substitua com suas informações
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://root:root@localhost/checklist'
 db = SQLAlchemy(app)
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Crie uma sessão do SQLAlchemy usando a instância db
+session = Session(db)
+
 class Checklist(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255))
@@ -24,6 +29,8 @@ class Task(db.Model):
     verificado = db.Column(db.Boolean, default=False)
     foto_verificado = db.Column(db.Boolean)
     checklist_id = db.Column(db.Integer, db.ForeignKey('checklist.id'), nullable=False)
+
+# checklist = session.get(Checklist, id)
 
 @app.route('/checklists', methods=['GET'])
 @cross_origin() 
@@ -136,103 +143,107 @@ def delete_checklist(id):
         if checklist is None:
             return jsonify({'error': 'Checklist not found'}), 404
 
-        # Se o checklist foi encontrado, exclua-o
+        # Remove todas as tarefas associadas a este checklist
+        for task in checklist.tasks:
+            db.session.delete(task)
+
+        # Se o checklist foi encontrado e todas as tarefas foram removidas, exclua-o
         db.session.delete(checklist)
         db.session.commit()
-        return jsonify({'message': 'Checklist deleted successfully'})
+        
+        return jsonify({'message': 'Checklist and associated tasks deleted successfully'})
     except Exception as e:
         # Em caso de erro, registre a exceção para depuração
         error_message = f"An error occurred while deleting the checklist: {str(e)}"
         return jsonify({'error': error_message}), 500
 
 
+# Rotas de Templates
+@app.route('/templates', methods=['GET'])
+@cross_origin() 
+def get_templates():
+    templates = Template.query.all()
+    template_list = []
 
-#Rotas de Templates
-# @app.route('/templates', methods=['GET'])
-# @cross_origin() 
-# def get_templates():
-#     templates = Template.query.all()
-#     template_list = []
+    for template in templates:
+        template_data = {
+            'id': template.id,
+            'nome': template.nome,
+        }
+        # Adicione a lista de checklists somente se houver checklists associados ao template
+        if template.checklists:
+            template_data['checklists'] = [{'id': checklist.id, 'name': checklist.name} for checklist in template.checklists]
 
-#     for template in templates:
-#         template_data = {
-#             'id': template.id,
-#             'nome': template.nome,
-#         }
-#         # Adicione a lista de checklists somente se houver checklists associados ao template
-#         if template.checklists:
-#             template_data['checklists'] = [{'id': checklist.id, 'name': checklist.name} for checklist in template.checklists]
+        template_list.append(template_data)
 
-#         template_list.append(template_data)
-
-#     return jsonify({'templates': template_list})
+    return jsonify({'templates': template_list})
 
 
-# @app.route('/templates/<int:id>', methods=['GET'])
-# @cross_origin() 
-# def get_template(id):
-#     template = Template.query.get(id)
-#     if template is None:
-#         return jsonify({'error': 'Template not found'}), 404
-#     template_data = {
-#         'id': template.id,
-#         'nome': template.nome,
-#         'checklists': [{'id': checklist.id, 'name': checklist.name} for checklist in template.checklists]
-#     }
-#     return jsonify(template_data)
+@app.route('/templates/<int:id>', methods=['GET'])
+@cross_origin() 
+def get_template(id):
+    template = Template.query.get(id)
+    if template is None:
+        return jsonify({'error': 'Template not found'}), 404
+    template_data = {
+        'id': template.id,
+        'nome': template.nome,
+        'checklists': [{'id': checklist.id, 'name': checklist.name} for checklist in template.checklists]
+    }
+    return jsonify(template_data)
 
-# @app.route('/templates', methods=['POST'])
-# @cross_origin() 
-# def create_template():
-#     data = request.json
-#     nome = data.get('nome')
-#     checklists_data = data.get('checklists', [])
+@app.route('/templates', methods=['POST'])
+@cross_origin() 
+def create_template():
+    data = request.json
+    nome = data.get('nome')
+    checklists_data = data.get('checklists', [])
 
-#     template = Template(nome=nome)
+    template = Template(nome=nome)
 
-#     for checklist_data in checklists_data:
-#         checklist_id = checklist_data.get('id')
-#         checklist = Checklist.query.get(checklist_id)
-#         if checklist:
-#             template.checklists.append(checklist)
+    for checklist_data in checklists_data:
+        checklist_id = checklist_data.get('id')
+        checklist = Checklist.query.get(checklist_id)
+        if checklist:
+            template.checklists.append(checklist)
 
-#     db.session.add(template)
-#     db.session.commit()
-#     return jsonify({'message': 'Template created successfully'}), 201
+    db.session.add(template)
+    db.session.commit()
+    return jsonify({'message': 'Template created successfully'}), 201
 
-# @app.route('/templates/<int:id>', methods=['PUT'])
-# @cross_origin() 
-# def update_template(id):
-#     template = Template.query.get(id)
-#     if template is None:
-#         return jsonify({'error': 'Template not found'}), 404
+@app.route('/templates/<int:id>', methods=['PUT'])
+@cross_origin() 
+def update_template(id):
+    template = Template.query.get(id)
+    if template is None:
+        return jsonify({'error': 'Template not found'}), 404
 
-#     data = request.json
-#     template.nome = data.get('nome')
+    data = request.json
+    template.nome = data.get('nome')
 
-#     # Atualize a lista de checklists associados ao template
-#     updated_checklists = []
-#     for checklist_data in data.get('checklists', []):
-#         checklist_id = checklist_data.get('id')
-#         checklist = Checklist.query.get(checklist_id)
-#         if checklist:
-#             updated_checklists.append(checklist)
+    # Atualize a lista de checklists associados ao template
+    updated_checklists = []
+    for checklist_data in data.get('checklists', []):
+        checklist_id = checklist_data.get('id')
+        checklist = Checklist.query.get(checklist_id)
+        if checklist:
+            updated_checklists.append(checklist)
 
-#     template.checklists = updated_checklists
+    template.checklists = updated_checklists
 
-#     db.session.commit()
-#     return jsonify({'message': 'Template updated successfully'})
+    db.session.commit()
+    return jsonify({'message': 'Template updated successfully'})
 
-# @app.route('/templates/<int:id>', methods=['DELETE'])
-# @cross_origin() 
-# def delete_template(id):
-#     template = Template.query.get(id)
-#     if template is None:
-#         return jsonify({'error': 'Template not found'}), 404
+@app.route('/templates/<int:id>', methods=['DELETE'])
+@cross_origin() 
+def delete_template(id):
+    template = Template.query.get(id)
+    if template is None:
+        return jsonify({'error': 'Template not found'}), 404
 
-#     db.session.delete(template)
-#     db.session.commit()
-#     return jsonify({'message': 'Template deleted successfully'})
+    db.session.delete(template)
+    db.session.commit()
+    return jsonify({'message': 'Template deleted successfully'})
 
 
 if __name__ == '__main__':
